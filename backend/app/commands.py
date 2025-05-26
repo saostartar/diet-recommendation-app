@@ -6,10 +6,10 @@ from app.models.recommendation import DietGoal
 from datetime import datetime, timedelta
 import random
 from sqlalchemy import func
-import pandas as pd
 import csv
 from app.models.food import Food
 from app.utils.food_classifier import FoodClassifier
+from app.models.recommendation import Recommendation
 
 
 @click.command('seed-users')
@@ -59,79 +59,155 @@ def seed_users_command(count):
         click.echo(f'Error creating test users: {str(e)}')
 
 
+KJ_TO_KCAL = 1 / 4.184
 @click.command('import-indonesian-foods')
-@click.option('--source', default='dataset-diet', help='Source directory for data files (dataset or dataset-diet)')
-@click.option('--classify', default=True, help='Run food classifier after import')
+@click.option('--source', default='dataset-diet', help='Source directory for data files. Default: dataset-diet')
+@click.option('--filename', default='foods_updated.csv', help='Filename of the CSV data. Default: foods_updated.csv') # Default diubah
+@click.option('--classify', default=True, type=bool, help='Run food classifier after import. Default: True')
 @with_appcontext
-def import_indonesian_foods(source, classify):
-    """Import Indonesian foods with only macronutrient data"""
+def import_indonesian_foods(source, filename, classify):
+    """Import Indonesian foods from the foods_updated.csv dataset."""
     try:
-        # First, delete all existing foods to avoid duplicates or conflicts
-        num_deleted = Food.query.delete()
+        # Hapus semua data rekomendasi yang terkait dengan makanan yang ada
+        num_deleted_recs = Recommendation.query.delete()
         db.session.commit()
-        click.echo(f"Deleted {num_deleted} existing food records")
+        click.echo(f"Deleted {num_deleted_recs} existing recommendation records.")
 
-        # Determine file path based on source option
-        file_path = f'../{source}/nutrition.csv'
+        # Hapus semua data makanan yang ada untuk menghindari duplikasi
+        num_deleted_foods = Food.query.delete()
+        db.session.commit()
+        click.echo(f"Deleted {num_deleted_foods} existing food records.")
+
+        file_path = f'./{source}/{filename}'
         count = 0
+        
+        # Indeks kolom berdasarkan file foods_updated.csv
+        # Kolom: id,Menu,Energy (kJ),Protein (g),Fat (g),Carbohydrates (g),Dietary Fiber (g),
+        # PUFA (g),Cholesterol (mg),Vitamin A (mg),Vitamin E (eq.) (mg),Vitamin B1 (mg),
+        # Vitamin B2 (mg),Vitamin B6 (mg),Total Folic Acid (µg),Vitamin C (mg),Sodium (mg),
+        # Potassium (mg),Calcium (mg),Magnesium (mg),Phosphorus (mg),Iron (mg),Zinc (mg),meal_type
+        
+        IDX_ID_CSV = 0 # Kolom 'id' dari CSV (bukan primary key tabel)
+        IDX_NAME = 1
+        IDX_ENERGY_KJ = 2
+        IDX_PROTEIN = 3
+        IDX_FAT = 4
+        IDX_CARBOHYDRATES = 5
+        IDX_DIETARY_FIBER = 6
+        IDX_PUFA = 7
+        IDX_CHOLESTEROL = 8
+        IDX_VITAMIN_A = 9
+        IDX_VITAMIN_E = 10
+        IDX_VITAMIN_B1 = 11
+        IDX_VITAMIN_B2 = 12
+        IDX_VITAMIN_B6 = 13
+        IDX_TOTAL_FOLIC_ACID = 14
+        IDX_VITAMIN_C = 15
+        IDX_SODIUM = 16
+        IDX_POTASSIUM = 17
+        IDX_CALCIUM = 18
+        IDX_MAGNESIUM = 19
+        IDX_PHOSPHORUS = 20
+        IDX_IRON = 21
+        IDX_ZINC = 22
+        IDX_MEAL_TYPE_CSV = 23 # Kolom 'meal_type' dari CSV, tidak disimpan langsung ke model Food
 
-        # Open and process the CSV file
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, 'r', encoding='utf-8-sig') as f:
             reader = csv.reader(f)
-            next(reader)  # Skip header row
+            header = next(reader) 
+            click.echo(f"CSV Header: {header}")
+            if len(header) < IDX_MEAL_TYPE_CSV + 1:
+                click.echo(f"Error: CSV file '{filename}' does not have the expected number of columns (at least {IDX_MEAL_TYPE_CSV + 1}). Found {len(header)} columns.")
+                return
 
-            for row in reader:
+            for row_number, row in enumerate(reader, 1):
                 try:
-                    if len(row) >= 6:  # Ensure row has enough columns
-                        # CSV format: id, calories, protein, fat, carbs, name, image_url
-                        calories = float(row[1]) if row[1] else 0
-                        protein = float(row[2]) if row[2] else 0
-                        fat = float(row[3]) if row[3] else 0
-                        carbs = float(row[4]) if row[4] else 0
-                        name = row[5]
-                        image_url = row[6] if len(row) > 6 and row[6] else None
+                    if not any(field.strip() for field in row):
+                        continue
 
-                        # Create a new food entry
-                        food = Food(
-                            name=name,
-                            caloric_value=calories,
-                            protein=protein,
-                            carbohydrates=carbs,
-                            fat=fat,
-                            image_url=image_url,
-                            # Default values for allergens
-                            contains_dairy=False,
-                            contains_nuts=False,
-                            contains_seafood=False,
-                            contains_eggs=False,
-                            contains_soy=False,
-                            # Default dietary values
-                            is_vegetarian=False,
-                            is_halal=True
-                        )
-                        db.session.add(food)
-                        count += 1
+                    if len(row) < IDX_MEAL_TYPE_CSV + 1:
+                        click.echo(f"Skipping row {row_number} due to insufficient columns: {row}")
+                        continue
 
-                        if count % 100 == 0:
-                            db.session.commit()
-                            click.echo(f"Processed {count} foods")
+                    name = row[IDX_NAME].strip()
+                    if not name:
+                        click.echo(f"Skipping row {row_number} due to empty food name.")
+                        continue
+                        
+                    def safe_float_conversion(value_str, default=0.0):
+                        try:
+                            # Mengganti koma dengan titik untuk desimal jika ada
+                            cleaned_value_str = str(value_str).replace(',', '.').strip()
+                            return float(cleaned_value_str) if cleaned_value_str else default
+                        except ValueError:
+                            # click.echo(f"Warning: Could not convert '{value_str}' to float for food '{name}'. Using default {default}.")
+                            return default
 
-                except (ValueError, IndexError) as e:
-                    click.echo(f"Error processing row: {row}. Error: {str(e)}")
+                    energy_kj = safe_float_conversion(row[IDX_ENERGY_KJ])
+                    caloric_value_kcal = energy_kj * KJ_TO_KCAL
+                    
+                    # Kolom meal_type dari CSV tidak disimpan ke model Food,
+                    # karena meal_type pada rekomendasi akan diprediksi oleh ML.
+                    # Data meal_type dari CSV ini akan digunakan untuk melatih model ML.
 
-        db.session.commit()
-        click.echo(f"Successfully imported {count} Indonesian foods")
+                    food = Food(
+                        name=name,
+                        energy_kj=energy_kj,
+                        caloric_value=caloric_value_kcal,
+                        protein=safe_float_conversion(row[IDX_PROTEIN]),
+                        fat=safe_float_conversion(row[IDX_FAT]),
+                        carbohydrates=safe_float_conversion(row[IDX_CARBOHYDRATES]),
+                        dietary_fiber=safe_float_conversion(row[IDX_DIETARY_FIBER]),
+                        pufa=safe_float_conversion(row[IDX_PUFA]),
+                        cholesterol=safe_float_conversion(row[IDX_CHOLESTEROL]),
+                        vitamin_a=safe_float_conversion(row[IDX_VITAMIN_A]),
+                        vitamin_e=safe_float_conversion(row[IDX_VITAMIN_E]),
+                        vitamin_b1=safe_float_conversion(row[IDX_VITAMIN_B1]),
+                        vitamin_b2=safe_float_conversion(row[IDX_VITAMIN_B2]),
+                        vitamin_b6=safe_float_conversion(row[IDX_VITAMIN_B6]),
+                        total_folic_acid=safe_float_conversion(row[IDX_TOTAL_FOLIC_ACID]),
+                        vitamin_c=safe_float_conversion(row[IDX_VITAMIN_C]),
+                        sodium=safe_float_conversion(row[IDX_SODIUM]),
+                        potassium=safe_float_conversion(row[IDX_POTASSIUM]),
+                        calcium=safe_float_conversion(row[IDX_CALCIUM]),
+                        magnesium=safe_float_conversion(row[IDX_MAGNESIUM]),
+                        phosphorus=safe_float_conversion(row[IDX_PHOSPHORUS]),
+                        iron=safe_float_conversion(row[IDX_IRON]),
+                        zinc=safe_float_conversion(row[IDX_ZINC]),
+                    )
+                    db.session.add(food)
+                    count += 1
 
-        # Run classifier to set dietary categories and allergens if requested
-        if classify:
-            click.echo(
-                "Classifying foods for dietary preferences and allergens...")
+                    if count % 200 == 0:
+                        db.session.commit()
+                        click.echo(f"Processed and committed {count} foods...")
+
+                except IndexError as e:
+                    click.echo(f"Error processing row {row_number}: {row}. IndexError: {str(e)}. Ensure CSV format is correct.")
+                except ValueError as e:
+                    click.echo(f"Error processing row {row_number}: {row}. ValueError: {str(e)}. Check data types.")
+                except Exception as e:
+                    click.echo(f"An unexpected error occurred at row {row_number}: {row}. Error: {str(e)}")
+                    db.session.rollback() 
+
+        db.session.commit() 
+        click.echo(f"Successfully imported {count} Indonesian foods from {file_path}.")
+
+        if classify and count > 0: 
+            click.echo("Classifying foods for dietary preferences and allergens...")
             classifier = FoodClassifier()
             classifier.classify_foods()
+            click.echo("Food classification complete.")
+        elif not classify:
+            click.echo("Skipping food classification as per --classify=False.")
+        elif count == 0:
+            click.echo("No food data imported, skipping classification.")
 
+    except FileNotFoundError:
+        click.echo(f"Error: File not found at {file_path}. Please ensure the dataset exists in '{source}/{filename}'.")
     except Exception as e:
         db.session.rollback()
-        click.echo(f"Error: {str(e)}")
+        click.echo(f"An unexpected error occurred during import: {str(e)}")
 
 
 @click.command('classify-foods')

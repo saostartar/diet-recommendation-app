@@ -3,9 +3,10 @@ from app.utils.collaborative_filtering import DietCollaborativeFiltering
 from app.utils.decision_tree import NutritionDecisionTree
 from app.utils.food_ml_classifier import FoodMLClassifier
 from app.models.user import User
-from app.models.recommendation import DietGoal, Recommendation
+from app.models.recommendation import DietGoal, Recommendation, FoodPreference
 from app.models.food import Food
 from app import db
+import random
 
 class HybridDietRecommender:
     def __init__(self):
@@ -14,225 +15,320 @@ class HybridDietRecommender:
         self.ml_classifier = FoodMLClassifier()
         self.cf_weight = 0.3
         self.nutrition_weight = 0.7
+        self.diversity_factor = 0.2  # Factor for promoting diversity
 
     def update_weights(self, user_id: int, food_id: int, rating: int) -> None:
-        """
-        Update recommendation weights based on user feedback
-        """
+        """Update recommendation weights based on user feedback."""
         try:
-            # Get user's previous ratings for this food
-            previous_ratings = Recommendation.query.filter_by(
+            previous_ratings_count = Recommendation.query.filter_by(
                 user_id=user_id,
-                food_id=food_id,
-                rating=rating
-            ).count()
+                food_id=food_id
+            ).filter(Recommendation.rating.isnot(None)).count()
 
-            # Adjust weights based on rating
-            if rating >= 4:  # Good rating
-                if previous_ratings > 3:  # User consistently likes this type of food
-                    self.cf_weight = min(0.4, self.cf_weight + 0.05)  # Increase CF weight
-                    self.nutrition_weight = 1 - self.cf_weight
-            elif rating <= 2:  # Poor rating
-                if previous_ratings > 3:  # User consistently dislikes this type of food
-                    self.cf_weight = max(0.2, self.cf_weight - 0.05)  # Decrease CF weight
-                    self.nutrition_weight = 1 - self.cf_weight
-
-            db.session.commit()
-
+            if rating >= 4:  # User likes the food
+                if previous_ratings_count > 2:
+                    self.cf_weight = min(0.5, self.cf_weight + 0.02)
+                    self.nutrition_weight = max(0.5, 1 - self.cf_weight)
+            elif rating <= 2:  # User dislikes the food
+                self.nutrition_weight = min(0.8, self.nutrition_weight + 0.05)
+                self.cf_weight = max(0.2, 1 - self.nutrition_weight)
         except Exception as e:
-            db.session.rollback()
-            print(f"Error updating weights: {str(e)}")
-            raise
+            print(f"Error updating weights: {e}")
 
     def get_recommendations(
         self,
         user: User,
         goal: DietGoal,
-        n_recommendations: int = 500,  # Increased to get more options per meal type
-        preferences: List[str] = None
+        preferences: List[str] = None,
+        total_initial_candidates: int = 500,
+        items_per_meal_type: Dict[str, int] = None
     ) -> List[Dict]:
-        """
-        Combines recommendations from CF and Decision Tree,
-        then applies preference filtering and meal type classification
-        """
-        # Step 1: Get nutrition recommendations (they're already Indonesian only)
+        """Get diverse food recommendations for all meal types."""
+        
+        if items_per_meal_type is None:
+            items_per_meal_type = {
+                'Sarapan': 5,
+                'Makan Siang': 5,
+                'Makan Malam': 5,
+                'Cemilan': 5
+            }
+
+        # 1. Get all foods and apply preference filtering first
+        all_foods = Food.query.all()
+        if not all_foods:
+            return []
+
+        # Filter foods by preferences early
+        filtered_foods = []
+        for food in all_foods:
+            if self._matches_preferences(food, preferences or []):
+                filtered_foods.append(food)
+
+        if not filtered_foods:
+            print("No foods match user preferences")
+            return []
+
+        print(f"Foods after preference filtering: {len(filtered_foods)}")
+
+        # 2. Get nutrition recommendations for filtered foods
         nutrition_recs = self.nutrition_recommender.get_nutrition_recommendations(
-            user,
-            goal,
-            n_recommendations=n_recommendations * 2
+            user, goal, n_recommendations=len(filtered_foods)
         )
-        
-        # Step 2: Get collaborative filtering recommendations
+
+        # 3. Get collaborative filtering recommendations
         cf_recs = self.cf_recommender.get_recommendations(
-            user.id,
-            n_recommendations=n_recommendations * 2
+            user.id, n_recommendations=min(total_initial_candidates, len(filtered_foods))
         )
-        
-        # Step 3: Combine recommendations with weights
+
+        # 4. Create comprehensive food scoring
         food_scores = {}
         
-        # Process CF recommendations
-        for rec in cf_recs:
-            food = Food.query.get(rec['food_id'])
-            if not food:
-                continue
-                
-            food_scores[rec['food_id']] = {
-                'food': food,
-                'score': rec['cf_score'] * self.cf_weight,
-                'cf_score': rec['cf_score'],
-                'nutrition_score': 0
-            }
-            
-        # Process nutrition recommendations
+        # Initialize with nutrition scores
         for rec in nutrition_recs:
             food = Food.query.get(rec['food_id'])
-            if not food:
-                continue
-                
-            if rec['food_id'] in food_scores:
-                food_scores[rec['food_id']]['nutrition_score'] = rec['nutrition_score']
-                food_scores[rec['food_id']]['score'] += rec['nutrition_score'] * self.nutrition_weight
-            else:
+            if food and food in filtered_foods:
                 food_scores[rec['food_id']] = {
                     'food': food,
-                    'score': rec['nutrition_score'] * self.nutrition_weight,
-                    'cf_score': 0,
-                    'nutrition_score': rec['nutrition_score']
+                    'nutrition_score': rec['nutrition_score'],
+                    'cf_score': 0.0,
+                    'diversity_bonus': 0.0,
+                    'medical_bonus': 0.0
                 }
 
-        # Step 4: Filter based on preferences
-        filtered_scores = {}
-        if preferences:
-            for food_id, data in food_scores.items():
-                if self._matches_preferences(data['food'], preferences):
-                    filtered_scores[food_id] = data
-        else:
-            filtered_scores = food_scores
+        # Add CF scores
+        for rec in cf_recs:
+            if rec['food_id'] in food_scores:
+                food_scores[rec['food_id']]['cf_score'] = rec['cf_score']
 
-        # Step 5: Classify each food by meal type
-        classification_success = 0
-        fallback_count = 0
+        # 5. Add medical condition bonuses
+        self._add_medical_condition_bonuses(food_scores, goal.medical_condition)
 
-        for food_id, data in filtered_scores.items():
-            food = data['food']
+        # 6. Classify meal types and group by meal type
+        meal_type_groups = {
+            'Sarapan': [],
+            'Makan Siang': [],
+            'Makan Malam': [],
+            'Cemilan': []
+        }
+
+        for food_id, data in food_scores.items():
+            food_obj = data['food']
             
             try:
-                # Predict food status (Mentah/Olahan)
-                food_status = self.ml_classifier.predict_food_status(
-                    food.name, 
-                    food.caloric_value, 
-                    food.protein,
-                    food.fat,
-                    food.carbohydrates
-                )
-                
-                # Predict meal type
                 meal_type = self.ml_classifier.predict_meal_type(
-                    food.name,
-                    food.caloric_value,
-                    food.protein,
-                    food.fat,
-                    food.carbohydrates,
-                    food_status
+                    food_obj.name,
+                    food_obj.energy_kj,
+                    food_obj.protein,
+                    food_obj.fat,
+                    food_obj.carbohydrates
+                )
+            except Exception as e:
+                print(f"Error classifying meal type for {food_obj.name}: {e}")
+                meal_type = self._classify_meal_type_by_calories(food_obj)
+
+            if meal_type in meal_type_groups:
+                # Calculate final score
+                final_score = (
+                    data['nutrition_score'] * self.nutrition_weight +
+                    data['cf_score'] * self.cf_weight +
+                    data['medical_bonus'] * 0.1
                 )
                 
-                classification_success += 1
-                
-            except Exception as e:
-                # Fallback classification if prediction fails
-                fallback_count += 1
-                if food.caloric_value < 200:
-                    food_status = 'Mentah'
-                    meal_type = 'Cemilan'
-                elif food.caloric_value > 500:
-                    food_status = 'Olahan'
-                    meal_type = 'Makan Malam'
-                else:
-                    food_status = 'Olahan' 
-                    meal_type = 'Makan Siang'
-                    
-            # Store predictions with the food data
-            data['food_status'] = food_status
-            data['meal_type'] = meal_type
-            data['is_model_prediction'] = True
+                meal_type_groups[meal_type].append({
+                    'food_id': food_id,
+                    'food_object': food_obj,
+                    'total_score': final_score,
+                    'cf_score': data['cf_score'],
+                    'nutrition_score': data['nutrition_score'],
+                    'meal_type': meal_type,
+                    'medical_bonus': data['medical_bonus']
+                })
 
-        if fallback_count > 0:
-            print(f"Used fallback classification for {fallback_count} foods")
-
-        # Step 6: Sort and return top recommendations with meal type info
+        # 7. Select diverse recommendations for each meal type
         final_recommendations = []
-        for food_id, data in filtered_scores.items():
-            final_recommendations.append({
-                'food_id': food_id,
-                'total_score': data['score'],
-                'cf_score': data['cf_score'],
-                'nutrition_score': data['nutrition_score'],
-                'food_status': data['food_status'],
-                'meal_type': data['meal_type']
-            })
         
-        # Sort by score and return all recommendations
-        return sorted(final_recommendations, key=lambda x: x['total_score'], reverse=True)
-    
-    
-    
+        for meal_type, candidates in meal_type_groups.items():
+            if not candidates:
+                continue
+                
+            # Sort by score
+            candidates.sort(key=lambda x: x['total_score'], reverse=True)
+            
+            # Select diverse items
+            selected = self._select_diverse_items(
+                candidates, 
+                items_per_meal_type.get(meal_type, 5),
+                user
+            )
+            
+            final_recommendations.extend(selected)
+
+        return final_recommendations
+
+    def _add_medical_condition_bonuses(self, food_scores: Dict, medical_condition: str):
+        """Add bonuses based on medical conditions."""
+        for food_id, data in food_scores.items():
+            food = data['food']
+            bonus = 0.0
+            
+            if medical_condition == 'diabetes':
+                # Prefer low carb, high fiber foods
+                if food.carbohydrates and food.carbohydrates < 15:
+                    bonus += 0.3
+                if food.dietary_fiber and food.dietary_fiber > 3:
+                    bonus += 0.2
+                if food.caloric_value and food.caloric_value < 200:
+                    bonus += 0.1
+                    
+            elif medical_condition == 'hypertension':
+                # Prefer low sodium, high potassium foods
+                if food.sodium and food.sodium < 300:
+                    bonus += 0.3
+                if food.potassium and food.potassium > 200:
+                    bonus += 0.2
+                if food.fat and food.fat < 5:
+                    bonus += 0.1
+                    
+            elif medical_condition == 'obesity':
+                # Prefer low calorie, high protein foods
+                if food.caloric_value and food.caloric_value < 150:
+                    bonus += 0.3
+                if food.protein and food.protein > 10:
+                    bonus += 0.2
+                if food.fat and food.fat < 3:
+                    bonus += 0.1
+                    
+            data['medical_bonus'] = bonus
+
+    def _select_diverse_items(self, candidates: List[Dict], target_count: int, user: User) -> List[Dict]:
+        """Select diverse items from candidates."""
+        if len(candidates) <= target_count:
+            return candidates
+            
+        selected = []
+        remaining = candidates.copy()
+        
+        # Always include top scorer
+        if remaining:
+            selected.append(remaining.pop(0))
+        
+        # Get user's recent foods to avoid repetition
+        recent_foods = self._get_recent_user_foods(user.id, days=7)
+        
+        while len(selected) < target_count and remaining:
+            best_candidate = None
+            best_diversity_score = -1
+            
+            for i, candidate in enumerate(remaining):
+                # Skip if user had this food recently
+                if candidate['food_id'] in recent_foods:
+                    continue
+                    
+                diversity_score = self._calculate_diversity_score(
+                    candidate, selected
+                )
+                
+                # Combine with recommendation score
+                combined_score = (
+                    candidate['total_score'] * 0.7 + 
+                    diversity_score * 0.3
+                )
+                
+                if combined_score > best_diversity_score:
+                    best_diversity_score = combined_score
+                    best_candidate = (i, candidate)
+            
+            if best_candidate:
+                selected.append(remaining.pop(best_candidate[0]))
+            else:
+                # If no diverse candidate found, pick next best
+                if remaining:
+                    selected.append(remaining.pop(0))
+        
+        return selected
+
+    def _calculate_diversity_score(self, candidate: Dict, selected: List[Dict]) -> float:
+        """Calculate diversity score for a candidate."""
+        if not selected:
+            return 1.0
+            
+        candidate_food = candidate['food_object']
+        diversity_score = 1.0
+        
+        for selected_item in selected:
+            selected_food = selected_item['food_object']
+            
+            # Check ingredient similarity (simplified)
+            if self._foods_are_similar(candidate_food, selected_food):
+                diversity_score *= 0.5
+                
+        return diversity_score
+
+    def _foods_are_similar(self, food1: Food, food2: Food) -> bool:
+        """Check if two foods are similar."""
+        name1 = food1.name.lower()
+        name2 = food2.name.lower()
+        
+        # Check for common ingredients
+        common_ingredients = [
+            'ayam', 'sapi', 'ikan', 'udang', 'telur',
+            'nasi', 'mie', 'roti', 'kentang',
+            'tahu', 'tempe', 'sayur'
+        ]
+        
+        for ingredient in common_ingredients:
+            if ingredient in name1 and ingredient in name2:
+                return True
+                
+        return False
+
+    def _get_recent_user_foods(self, user_id: int, days: int = 7) -> set:
+        """Get foods user consumed recently."""
+        from datetime import datetime, timedelta
+        
+        cutoff_date = datetime.now().date() - timedelta(days=days)
+        
+        recent_recs = Recommendation.query.filter(
+            Recommendation.user_id == user_id,
+            Recommendation.recommendation_date >= cutoff_date,
+            Recommendation.is_consumed == True
+        ).all()
+        
+        return {rec.food_id for rec in recent_recs}
+
+    def _classify_meal_type_by_calories(self, food: Food) -> str:
+        """Fallback meal type classification by calories."""
+        if not food.caloric_value:
+            return 'Cemilan'
+            
+        if food.caloric_value < 100:
+            return 'Cemilan'
+        elif food.caloric_value < 250:
+            return 'Sarapan'
+        elif food.caloric_value < 400:
+            return 'Makan Siang'
+        else:
+            return 'Makan Malam'
+
     def _matches_preferences(self, food: Food, preferences: List[str]) -> bool:
-        """Check if food matches user dietary preferences and allergy restrictions"""
+        """Check if food matches user preferences."""
         if not preferences:
             return True
             
-        # Check each preference against food attributes
-        for pref in preferences:
-            # Check diet type
-            if pref == 'vegetarian' and not food.is_vegetarian:
-                print(f"Food {food.name} rejected: not vegetarian")
+        for pref_type in preferences:
+            if pref_type == 'vegetarian' and not food.is_vegetarian:
                 return False
-            elif pref == 'halal' and not food.is_halal:
-                print(f"Food {food.name} rejected: not halal")
+            if pref_type == 'halal' and not food.is_halal:
                 return False
-                
-            # Check allergies using more careful detection from food name
-            name_lower = food.name.lower()
-            
-            # Dairy allergy check
-            if pref == 'dairy_free' and (
-                food.contains_dairy or 
-                any(kw in name_lower for kw in ['susu', 'keju', 'yogurt', 'krim', 'mentega'])
-            ):
-                print(f"Food {food.name} rejected: contains dairy")
+            if pref_type == 'dairy_free' and food.contains_dairy:
                 return False
-                
-            # Nut allergy check  
-            if pref == 'nut_free' and (
-                food.contains_nuts or
-                any(kw in name_lower for kw in ['kacang', 'mete', 'almond', 'kenari'])
-            ):
-                print(f"Food {food.name} rejected: contains nuts")
+            if pref_type == 'nut_free' and food.contains_nuts:
                 return False
-                
-            # Seafood allergy check
-            if pref == 'seafood_free' and (
-                food.contains_seafood or
-                any(kw in name_lower for kw in ['ikan', 'udang', 'cumi', 'kerang', 'laut', 'seafood'])
-            ):
-                print(f"Food {food.name} rejected: contains seafood")
+            if pref_type == 'seafood_free' and food.contains_seafood:
                 return False
-                
-            # Egg allergy check
-            if pref == 'egg_free' and (
-                food.contains_eggs or
-                'telur' in name_lower
-            ):
-                print(f"Food {food.name} rejected: contains eggs")
+            if pref_type == 'egg_free' and food.contains_eggs:
                 return False
-                
-            # Soy allergy check
-            if pref == 'soy_free' and (
-                food.contains_soy or
-                any(kw in name_lower for kw in ['kedelai', 'tahu', 'tempe', 'kecap'])
-            ):
-                print(f"Food {food.name} rejected: contains soy")
+            if pref_type == 'soy_free' and food.contains_soy:
                 return False
                 
         return True
