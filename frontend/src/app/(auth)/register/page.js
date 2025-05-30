@@ -16,9 +16,9 @@ export default function Register() {
     height: '',
     gender: '',
     activity_level: '',
-    medical_condition: ''
+    medical_condition: 'none'
   });
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
 
@@ -31,21 +31,122 @@ export default function Register() {
     { value: 'very_active', label: 'Sangat Aktif (Atlet/Pekerja Fisik)' }
   ];
 
+  // Medical conditions matching the backend model
+  const medicalConditions = [
+    { value: 'none', label: 'Tidak Ada Kondisi Medis' },
+    { value: 'diabetes', label: 'Diabetes' },
+    { value: 'hypertension', label: 'Hipertensi' },
+    { value: 'obesity', label: 'Obesitas' }
+  ];
+
+  // Client-side validation functions
+  const validateStep1 = () => {
+    const newErrors = {};
+
+    // Username validation
+    if (!formData.username.trim()) {
+      newErrors.username = 'Nama pengguna wajib diisi';
+    } else if (formData.username.length < 3) {
+      newErrors.username = 'Nama pengguna minimal 3 karakter';
+    } else if (formData.username.length > 50) {
+      newErrors.username = 'Nama pengguna maksimal 50 karakter';
+    } else if (!/^[a-zA-Z0-9_]+$/.test(formData.username)) {
+      newErrors.username = 'Nama pengguna hanya boleh mengandung huruf, angka, dan underscore';
+    }
+
+    // Email validation
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email wajib diisi';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      newErrors.email = 'Format email tidak valid';
+    } else if (formData.email.length > 100) {
+      newErrors.email = 'Email maksimal 100 karakter';
+    }
+
+    // Password validation
+    if (!formData.password) {
+      newErrors.password = 'Kata sandi wajib diisi';
+    } else if (formData.password.length < 8) {
+      newErrors.password = 'Kata sandi minimal 8 karakter';
+    } else if (!/(?=.*[A-Za-z])/.test(formData.password)) {
+      newErrors.password = 'Kata sandi harus mengandung minimal satu huruf';
+    } else if (!/(?=.*\d)/.test(formData.password)) {
+      newErrors.password = 'Kata sandi harus mengandung minimal satu angka';
+    }
+
+    // Confirm password validation
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = 'Konfirmasi kata sandi wajib diisi';
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = 'Konfirmasi kata sandi tidak cocok';
+    }
+
+    return newErrors;
+  };
+
+  const validateStep2 = () => {
+    const newErrors = {};
+
+    // Age validation
+    const age = parseInt(formData.age);
+    if (!formData.age) {
+      newErrors.age = 'Usia wajib diisi';
+    } else if (isNaN(age) || age < 18 || age > 65) {
+      newErrors.age = 'Usia harus antara 12-100 tahun';
+    }
+
+    // Weight validation
+    const weight = parseFloat(formData.weight);
+    if (!formData.weight) {
+      newErrors.weight = 'Berat badan wajib diisi';
+    } else if (isNaN(weight) || weight < 30 || weight > 300) {
+      newErrors.weight = 'Berat badan harus antara 30-300 kg';
+    }
+
+    // Height validation
+    const height = parseFloat(formData.height);
+    if (!formData.height) {
+      newErrors.height = 'Tinggi badan wajib diisi';
+    } else if (isNaN(height) || height < 100 || height > 250) {
+      newErrors.height = 'Tinggi badan harus antara 100-250 cm';
+    }
+
+    // Gender validation
+    if (!formData.gender) {
+      newErrors.gender = 'Jenis kelamin wajib dipilih';
+    }
+
+    // Activity level validation
+    if (!formData.activity_level) {
+      newErrors.activity_level = 'Tingkat aktivitas wajib dipilih';
+    }
+
+    return newErrors;
+  };
+
   const handleNextStep = () => {
-    setCurrentStep(2);
+    const step1Errors = validateStep1();
+    setErrors(step1Errors);
+    
+    if (Object.keys(step1Errors).length === 0) {
+      setCurrentStep(2);
+    }
   };
 
   const handlePrevStep = () => {
     setCurrentStep(1);
+    setErrors({});
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
 
-    if (formData.password !== formData.confirmPassword) {
-      setError('Konfirmasi kata sandi tidak cocok');
+    // Validate step 2
+    const step2Errors = validateStep2();
+    setErrors(step2Errors);
+
+    if (Object.keys(step2Errors).length > 0) {
       setLoading(false);
       return;
     }
@@ -61,14 +162,43 @@ export default function Register() {
           ...formData,
           age: parseInt(formData.age),
           weight: parseFloat(formData.weight),
-          height: parseFloat(formData.height)
+          height: parseFloat(formData.height),
+          medical_condition: formData.medical_condition === 'none' ? '' : formData.medical_condition
         }),
       });
 
       const registerData = await registerRes.json();
 
       if (!registerRes.ok) {
-        throw new Error(registerData.message || 'Terjadi kesalahan saat mendaftar');
+        if (registerData.errors) {
+          // Handle validation errors from backend
+          const backendErrors = {};
+          registerData.errors.forEach(error => {
+            // Map backend errors to form fields
+            if (error.includes('username') || error.includes('Nama pengguna')) {
+              backendErrors.username = error;
+            } else if (error.includes('email') || error.includes('Email')) {
+              backendErrors.email = error;
+            } else if (error.includes('password') || error.includes('Kata sandi')) {
+              backendErrors.password = error;
+            } else if (error.includes('age') || error.includes('Usia')) {
+              backendErrors.age = error;
+            } else if (error.includes('weight') || error.includes('Berat')) {
+              backendErrors.weight = error;
+            } else if (error.includes('height') || error.includes('Tinggi')) {
+              backendErrors.height = error;
+            } else if (error.includes('gender') || error.includes('Jenis kelamin')) {
+              backendErrors.gender = error;
+            } else if (error.includes('activity') || error.includes('aktivitas')) {
+              backendErrors.activity_level = error;
+            }
+          });
+          setErrors(backendErrors);
+        } else {
+          setErrors({ general: registerData.message || 'Terjadi kesalahan saat mendaftar' });
+        }
+        setLoading(false);
+        return;
       }
 
       // Automatically login after successful registration
@@ -95,7 +225,7 @@ export default function Register() {
       // Redirect to dashboard
       router.push('/dashboard');
     } catch (err) {
-      setError(err.message);
+      setErrors({ general: err.message });
     } finally {
       setLoading(false);
     }
@@ -143,7 +273,7 @@ export default function Register() {
           </motion.p>
         </div>
 
-        {error && (
+        {errors.general && (
           <motion.div 
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -152,7 +282,7 @@ export default function Register() {
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-red-500" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
-            {error}
+            {errors.general}
           </motion.div>
         )}
 
@@ -182,7 +312,7 @@ export default function Register() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label htmlFor="username" className="block text-sm font-medium text-gray-700">
-                    Nama Pengguna
+                    Nama Pengguna *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -195,17 +325,18 @@ export default function Register() {
                       name="username"
                       id="username"
                       required
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.username ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors`}
                       placeholder="Masukkan nama pengguna"
                       value={formData.username}
                       onChange={(e) => setFormData({...formData, username: e.target.value})}
                     />
                   </div>
+                  {errors.username && <p className="text-red-600 text-sm">{errors.username}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                    Alamat Email
+                    Alamat Email *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -218,17 +349,18 @@ export default function Register() {
                       name="email"
                       id="email"
                       required
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.email ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors`}
                       placeholder="nama@email.com"
                       value={formData.email}
                       onChange={(e) => setFormData({...formData, email: e.target.value})}
                     />
                   </div>
+                  {errors.email && <p className="text-red-600 text-sm">{errors.email}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                    Kata Sandi
+                    Kata Sandi *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -241,17 +373,18 @@ export default function Register() {
                       name="password"
                       id="password"
                       required
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
-                      placeholder="Minimal 8 karakter"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.password ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors`}
+                      placeholder="Minimal 8 karakter dengan huruf dan angka"
                       value={formData.password}
                       onChange={(e) => setFormData({...formData, password: e.target.value})}
                     />
                   </div>
+                  {errors.password && <p className="text-red-600 text-sm">{errors.password}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
-                    Konfirmasi Kata Sandi
+                    Konfirmasi Kata Sandi *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -264,12 +397,13 @@ export default function Register() {
                       name="confirmPassword"
                       id="confirmPassword"
                       required
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.confirmPassword ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors`}
                       placeholder="Konfirmasi kata sandi"
                       value={formData.confirmPassword}
                       onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
                     />
                   </div>
+                  {errors.confirmPassword && <p className="text-red-600 text-sm">{errors.confirmPassword}</p>}
                 </div>
 
                 <div className="md:col-span-2 flex justify-end mt-4">
@@ -289,7 +423,7 @@ export default function Register() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label htmlFor="age" className="block text-sm font-medium text-gray-700">
-                    Usia
+                    Usia *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -302,19 +436,20 @@ export default function Register() {
                       name="age"
                       id="age"
                       required
-                      min="12"
-                      max="100"
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
-                      placeholder="Usia (tahun)"
+                      min="18"
+                      max="65"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.age ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors`}
+                      placeholder="Usia (12-100 tahun)"
                       value={formData.age}
                       onChange={(e) => setFormData({...formData, age: e.target.value})}
                     />
                   </div>
+                  {errors.age && <p className="text-red-600 text-sm">{errors.age}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <label htmlFor="gender" className="block text-sm font-medium text-gray-700">
-                    Jenis Kelamin
+                    Jenis Kelamin *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -326,7 +461,7 @@ export default function Register() {
                       id="gender"
                       name="gender"
                       required
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors appearance-none"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.gender ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors appearance-none`}
                       value={formData.gender}
                       onChange={(e) => setFormData({...formData, gender: e.target.value})}
                     >
@@ -340,11 +475,12 @@ export default function Register() {
                       </svg>
                     </div>
                   </div>
+                  {errors.gender && <p className="text-red-600 text-sm">{errors.gender}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <label htmlFor="weight" className="block text-sm font-medium text-gray-700">
-                    Berat Badan (kg)
+                    Berat Badan (kg) *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -358,17 +494,20 @@ export default function Register() {
                       id="weight"
                       required
                       step="0.1"
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
-                      placeholder="Masukkan berat badan"
+                      min="30"
+                      max="300"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.weight ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors`}
+                      placeholder="Berat badan (30-300 kg)"
                       value={formData.weight}
                       onChange={(e) => setFormData({...formData, weight: e.target.value})}
                     />
                   </div>
+                  {errors.weight && <p className="text-red-600 text-sm">{errors.weight}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <label htmlFor="height" className="block text-sm font-medium text-gray-700">
-                    Tinggi Badan (cm)
+                    Tinggi Badan (cm) *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -382,17 +521,20 @@ export default function Register() {
                       id="height"
                       required
                       step="0.1"
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
-                      placeholder="Masukkan tinggi badan"
+                      min="100"
+                      max="250"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.height ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors`}
+                      placeholder="Tinggi badan (100-250 cm)"
                       value={formData.height}
                       onChange={(e) => setFormData({...formData, height: e.target.value})}
                     />
                   </div>
+                  {errors.height && <p className="text-red-600 text-sm">{errors.height}</p>}
                 </div>
 
                 <div className="md:col-span-2 space-y-2">
                   <label htmlFor="activity_level" className="block text-sm font-medium text-gray-700">
-                    Tingkat Aktivitas
+                    Tingkat Aktivitas *
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -404,7 +546,7 @@ export default function Register() {
                       id="activity_level"
                       name="activity_level"
                       required
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors appearance-none"
+                      className={`pl-10 w-full px-4 py-3 bg-gray-50 border ${errors.activity_level ? 'border-red-300' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors appearance-none`}
                       value={formData.activity_level}
                       onChange={(e) => setFormData({...formData, activity_level: e.target.value})}
                     >
@@ -421,28 +563,41 @@ export default function Register() {
                       </svg>
                     </div>
                   </div>
+                  {errors.activity_level && <p className="text-red-600 text-sm">{errors.activity_level}</p>}
                 </div>
 
                 <div className="md:col-span-2 space-y-2">
                   <label htmlFor="medical_condition" className="block text-sm font-medium text-gray-700">
-                    Kondisi Medis (opsional)
+                    Kondisi Medis
                   </label>
                   <div className="mt-1 relative rounded-md shadow-sm">
-                    <div className="absolute top-3 left-0 pl-3 flex items-start pointer-events-none">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4H5a3 3 0 013-3h8a3 3 0 013 3h-3zm-3-5h-2v2h2V6z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m-6-8h6M5 5a2 2 0 012-2h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5z" />
                       </svg>
                     </div>
-                    <textarea
+                    <select
                       id="medical_condition"
                       name="medical_condition"
-                      rows="3"
-                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
-                      placeholder="Masukkan kondisi medis atau alergi yang Anda miliki"
+                      className="pl-10 w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors appearance-none"
                       value={formData.medical_condition}
                       onChange={(e) => setFormData({...formData, medical_condition: e.target.value})}
-                    ></textarea>
+                    >
+                      {medicalConditions.map((condition) => (
+                        <option key={condition.value} value={condition.value}>
+                          {condition.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
                   </div>
+                  <p className="text-sm text-gray-500">
+                    Pilih kondisi medis yang sesuai untuk mendapatkan rekomendasi diet yang tepat
+                  </p>
                 </div>
 
                 <div className="md:col-span-2 flex justify-between mt-4">

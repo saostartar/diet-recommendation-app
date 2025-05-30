@@ -4,52 +4,55 @@ from datetime import datetime
 class Food(db.Model):
     __tablename__ = 'foods'
 
+    # Kolom identifikasi utama
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(255), nullable=False) # 'Menu' in CSV
+    food_code = db.Column(db.String(50), unique=True, nullable=True) # Dari kolom 'kode' di CSV
 
-    # Macronutrients and Energy
-    energy_kj = db.Column(db.Float) # 'Energy (kJ)' in CSV
-    caloric_value = db.Column(db.Float) # Akan dikonversi dari energy_kj
-    protein = db.Column(db.Float) # 'Protein (g)' in CSV
-    fat = db.Column(db.Float) # 'Fat (g)' in CSV
-    carbohydrates = db.Column(db.Float) # 'Carbohydrates (g)' in CSV
-    dietary_fiber = db.Column(db.Float) # 'Dietary Fiber (g)' in CSV
+    # Informasi dasar makanan dari CSV
+    name = db.Column(db.String(255), nullable=False) # Dari 'nama_makanan' di CSV
+
+    # Energi dan Makronutrien Utama dari CSV
+    caloric_value = db.Column(db.Float, nullable=True) # Dari 'energi_kal' di CSV
+    protein = db.Column(db.Float, nullable=True) # Dari 'protein_g' di CSV
+    fat = db.Column(db.Float, nullable=True) # Dari 'lemak_g' di CSV
+    carbohydrates = db.Column(db.Float, nullable=True) # Dari 'karbohidrat_g' di CSV
+    dietary_fiber = db.Column(db.Float, nullable=True) # Dari 'serat_g' di CSV
+
+    # Mineral dari CSV
+    calcium = db.Column(db.Float, nullable=True) # Dari 'kalsium_mg' di CSV
+    phosphorus = db.Column(db.Float, nullable=True) # Dari 'fosfor_mg' di CSV
+    iron = db.Column(db.Float, nullable=True) # Dari 'besi_mg' di CSV
+    sodium = db.Column(db.Float, nullable=True) # Dari 'natrium_mg' di CSV
+    potassium = db.Column(db.Float, nullable=True) # Dari 'kalium_mg' di CSV
+    copper = db.Column(db.Float, nullable=True) # Dari 'tembaga_mg' di CSV
+    zinc = db.Column(db.Float, nullable=True) # Dari 'seng_mg' di CSV
     
-    # Detailed Fats and Cholesterol
-    pufa = db.Column(db.Float) # 'PUFA (g)' in CSV - Polyunsaturated Fatty Acids
-    cholesterol = db.Column(db.Float) # 'Cholesterol (mg)' in CSV
-
-    # Vitamins
-    vitamin_a = db.Column(db.Float) # 'Vitamin A (mg)' in CSV
-    vitamin_e = db.Column(db.Float) # 'Vitamin E (eq.) (mg)' in CSV
-    vitamin_b1 = db.Column(db.Float) # 'Vitamin B1 (mg)' in CSV
-    vitamin_b2 = db.Column(db.Float) # 'Vitamin B2 (mg)' in CSV
-    vitamin_b6 = db.Column(db.Float) # 'Vitamin B6 (mg)' in CSV
-    total_folic_acid = db.Column(db.Float) # 'Total Folic Acid (µg)' in CSV
-    vitamin_c = db.Column(db.Float) # 'Vitamin C (mg)' in CSV
-
-    # Minerals
-    sodium = db.Column(db.Float) # 'Sodium (mg)' in CSV
-    potassium = db.Column(db.Float) # 'Potassium (mg)' in CSV
-    calcium = db.Column(db.Float) # 'Calcium (mg)' in CSV
-    magnesium = db.Column(db.Float) # 'Magnesium (mg)' in CSV
-    phosphorus = db.Column(db.Float) # 'Phosphorus (mg)' in CSV
-    iron = db.Column(db.Float) # 'Iron (mg)' in CSV
-    zinc = db.Column(db.Float) # 'Zinc (mg)' in CSV
+    # Vitamin dari CSV
+    retinol_mcg = db.Column(db.Float, nullable=True) # Dari 'retinol_mcg' di CSV
+    thiamin_mg = db.Column(db.Float, nullable=True) # Dari 'thiamin_mg' di CSV
+    riboflavin_mg = db.Column(db.Float, nullable=True) # Dari 'riboflavin_mg' di CSV
+    niacin_mg = db.Column(db.Float, nullable=True) # Dari 'niasin_mg' di CSV
+    vitamin_c = db.Column(db.Float, nullable=True) # Dari 'vitamin_c_mg' di CSV
     
-    # Kolom-kolom ini akan diisi oleh FoodClassifier
+    # Informasi Tambahan Kategorikal dari CSV
+    food_status = db.Column(db.String(100), nullable=True) # Dari 'status_makanan' di CSV
+    food_group = db.Column(db.String(100), nullable=True) # Dari 'kelompok_makanan' di CSV
+    meal_type = db.Column(db.String(100), nullable=True) # Dari 'meal_type' di CSV
+
+    # Kolom yang diisi oleh FoodClassifier (logika aplikasi)
     is_vegetarian = db.Column(db.Boolean, default=False)
-    is_halal = db.Column(db.Boolean, default=True) # Default ke True, kecuali diklasifikasikan lain
-    
+    is_halal = db.Column(db.Boolean, default=True) 
     contains_dairy = db.Column(db.Boolean, default=False)
-    contains_nuts = db.Column(db.Boolean, default=False) # Mengganti contains_peanuts
+    contains_nuts = db.Column(db.Boolean, default=False) 
     contains_seafood = db.Column(db.Boolean, default=False)
     contains_eggs = db.Column(db.Boolean, default=False)
     contains_soy = db.Column(db.Boolean, default=False)
 
+
+    # Timestamp (logika aplikasi)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def __repr__(self):
-        return f'<Food {self.name}>'
+        return f'<Food {self.name} ({self.food_code})>'
 
