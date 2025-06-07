@@ -66,11 +66,11 @@ export default function Navbar() {
                     className="py-2 px-4 text-gray-600 hover:text-green-700 rounded-full transition-all duration-300 hover:bg-white hover:shadow-sm">
                     Rekomendasi
                   </Link>
-                  <Link
+                  {/* <Link
                     href="/progress-tracking"
                     className="py-2 px-4 text-gray-600 hover:text-green-700 rounded-full transition-all duration-300 hover:bg-white hover:shadow-sm">
                     Progress
-                  </Link>
+                  </Link> */}
                 </div>
                 
                 <div className="flex items-center space-x-2 ml-2">

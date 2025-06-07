@@ -9,12 +9,14 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [userData, setUserData] = useState(null);
-  const [recommendations, setRecommendations] = useState(null);
+  const [nutritionInfo, setNutritionInfo] = useState(null);
+  const [lastWeightUpdate, setLastWeightUpdate] = useState(null);
 
   useEffect(() => {
     fetchUserData();
-    fetchRecommendations();
     fetchDietGoal();
+    fetchNutritionInfo();
+    fetchLastWeightUpdate();
   }, []);
 
   const fetchUserData = async () => {
@@ -58,25 +60,42 @@ export default function Dashboard() {
     }
   };
 
-  const fetchRecommendations = async () => {
+  const fetchNutritionInfo = async () => {
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/recommend/daily-menu`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/preferences`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+      });
 
-      if (!res.ok) throw new Error("Gagal memuat rekomendasi");
-
-      const data = await res.json();
-      setRecommendations(data);
+      if (res.ok) {
+        const data = await res.json();
+        setNutritionInfo(data);
+      }
     } catch (err) {
-      setError(err.message);
+      console.error("Error fetching nutrition info:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchLastWeightUpdate = async () => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/progress/weight`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.progress && data.progress.length > 0) {
+          const lastUpdate = data.progress[data.progress.length - 1];
+          setLastWeightUpdate(lastUpdate);
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching last weight update:", err);
     }
   };
 
@@ -128,6 +147,28 @@ export default function Dashboard() {
     }
 
     return Math.round(dailyCalories);
+  };
+
+  const calculateBMI = (weight, height) => {
+    if (!weight || !height) return 0;
+    const heightInMeters = height / 100;
+    return (weight / (heightInMeters * heightInMeters)).toFixed(1);
+  };
+
+  const getBMICategory = (bmi) => {
+    if (bmi < 18.5) return { category: "Kurus", color: "text-blue-600" };
+    if (bmi < 25) return { category: "Normal", color: "text-green-600" };
+    if (bmi < 30) return { category: "Berlebih", color: "text-yellow-600" };
+    return { category: "Obesitas", color: "text-red-600" };
+  };
+
+  const getDaysUntilTarget = () => {
+    if (!userData?.diet_goal?.target_date) return null;
+    const targetDate = new Date(userData.diet_goal.target_date);
+    const today = new Date();
+    const diffTime = targetDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > 0 ? diffDays : 0;
   };
 
   if (loading) {
@@ -525,7 +566,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Quick Actions */}
+        {/* Informasi Berguna */}
         <h2 className="text-xl font-bold text-gray-800 mb-4 px-1 flex items-center">
           <svg
             className="w-5 h-5 mr-2 text-green-600"
@@ -533,98 +574,146 @@ export default function Dashboard() {
             viewBox="0 0 20 20">
             <path
               fillRule="evenodd"
-              d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z"
+              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
               clipRule="evenodd"
             />
           </svg>
-          Aksi Cepat
+          Informasi Berguna
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-          <Link
-            href="/profile"
-            className="group bg-white p-6 rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-green-200 flex items-start">
-            <div className="mr-4 bg-green-100 p-3 rounded-xl group-hover:bg-green-200 transition-colors">
-              <svg
-                className="w-6 h-6 text-green-700"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                />
-              </svg>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+          {/* BMI Information */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100">
+            <div className="flex items-center mb-4">
+              <div className="mr-4 bg-indigo-100 p-3 rounded-xl">
+                <svg
+                  className="w-6 h-6 text-indigo-700"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">BMI Anda</h3>
+                <p className="text-2xl font-bold text-indigo-600">
+                  {calculateBMI(userData?.weight, userData?.height)}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-1 group-hover:text-green-700 transition-colors">
-                Update Profil
-              </h3>
-              <p className="text-gray-600">
-                Perbarui informasi pribadi dan preferensi diet Anda
-              </p>
+            <div className="text-center">
+              <span className={`text-sm font-medium ${getBMICategory(calculateBMI(userData?.weight, userData?.height)).color}`}>
+                Kategori: {getBMICategory(calculateBMI(userData?.weight, userData?.height)).category}
+              </span>
             </div>
-          </Link>
+          </div>
 
-          <Link
-            href="/diet-goals"
-            className="group bg-white p-6 rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-green-200 flex items-start">
-            <div className="mr-4 bg-blue-100 p-3 rounded-xl group-hover:bg-blue-200 transition-colors">
-              <svg
-                className="w-6 h-6 text-blue-700"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-                />
-              </svg>
+          {/* Diet Type Information */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100">
+            <div className="flex items-center mb-4">
+              <div className="mr-4 bg-green-100 p-3 rounded-xl">
+                <svg
+                  className="w-6 h-6 text-green-700"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Tipe Diet</h3>
+                <p className="text-sm text-gray-600">
+                  {nutritionInfo?.has_preferences 
+                    ? (nutritionInfo.preferences.diet_type || 'Umum')
+                    : 'Belum diatur'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-1 group-hover:text-blue-700 transition-colors">
-                Tujuan Penurunan Berat
-              </h3>
-              <p className="text-gray-600">
-                Tetapkan target penurunan berat badan dan kondisi kesehatan Anda
-              </p>
+            <div className="text-xs text-gray-500">
+              {nutritionInfo?.has_preferences && nutritionInfo.preferences.allergies?.length > 0
+                ? `Alergi: ${nutritionInfo.preferences.allergies.length} item`
+                : 'Tidak ada alergi yang tercatat'}
             </div>
-          </Link>
+          </div>
 
-          <Link
-            href="/progress"
-            className="group bg-white p-6 rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-green-200 flex items-start">
-            <div className="mr-4 bg-purple-100 p-3 rounded-xl group-hover:bg-purple-200 transition-colors">
-              <svg
-                className="w-6 h-6 text-purple-700"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
+          {/* Target Date Information */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100">
+            <div className="flex items-center mb-4">
+              <div className="mr-4 bg-orange-100 p-3 rounded-xl">
+                <svg
+                  className="w-6 h-6 text-orange-700"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Target Waktu</h3>
+                <p className="text-lg font-bold text-orange-600">
+                  {getDaysUntilTarget() !== null ? `${getDaysUntilTarget()} hari` : 'Belum diatur'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-1 group-hover:text-purple-700 transition-colors">
-                Pantau Progress
-              </h3>
-              <p className="text-gray-600">
-                Lihat dan analisa perkembangan diet Anda
-              </p>
+            <div className="text-xs text-gray-500">
+              {userData?.diet_goal?.target_date 
+                ? `Target: ${new Date(userData.diet_goal.target_date).toLocaleDateString('id-ID')}`
+                : 'Belum ada target tanggal'}
             </div>
-          </Link>
+          </div>
+
+          {/* Last Weight Update */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100">
+            <div className="flex items-center mb-4">
+              <div className="mr-4 bg-purple-100 p-3 rounded-xl">
+                <svg
+                  className="w-6 h-6 text-purple-700"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Update Terakhir</h3>
+                <p className="text-sm font-medium text-purple-600">
+                  {lastWeightUpdate 
+                    ? `${lastWeightUpdate.weight} kg`
+                    : 'Belum ada data'}
+                </p>
+              </div>
+            </div>
+            <div className="text-xs text-gray-500">
+              {lastWeightUpdate 
+                ? new Date(lastWeightUpdate.date).toLocaleDateString('id-ID', { 
+                    day: 'numeric', 
+                    month: 'short', 
+                    year: 'numeric' 
+                  })
+                : 'Perbarui berat badan Anda'}
+            </div>
+          </div>
         </div>
-
-        {/* Daily Menu Recommendations - Indonesian Foods */}
-        
 
         {error && (
           <div className="mt-6 bg-red-50 border border-red-200 text-red-600 p-4 rounded-xl flex items-center">

@@ -103,7 +103,7 @@ export default function Footer() {
                 </div>
                 <div>
                   <p className="font-medium text-green-200 mb-1">Alamat</p>
-                  <p className="text-green-100">Jl. Sehat Sejahtera No. 123, Jakarta Selatan, Indonesia 12345</p>
+                  <p className="text-green-100">Kombos, Jl. Kairagi I, Kairagi Satu, Kota Manado, Sulawesi Utara</p>
                 </div>
               </li>
               <li className="flex items-start">
@@ -114,7 +114,7 @@ export default function Footer() {
                 </div>
                 <div>
                   <p className="font-medium text-green-200 mb-1">Email</p>
-                  <p className="text-green-100">info@dietplan.id</p>
+                  <p className="text-green-100">21013008@gmail.com</p>
                 </div>
               </li>
               <li className="flex items-start">
@@ -125,7 +125,7 @@ export default function Footer() {
                 </div>
                 <div>
                   <p className="font-medium text-green-200 mb-1">Telepon</p>
-                  <p className="text-green-100">+62 123-4567-8910</p>
+                  <p className="text-green-100">0895803763639</p>
                 </div>
               </li>
             </ul>
